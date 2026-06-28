@@ -1,0 +1,102 @@
+services:
+
+  # ──────────────────────────────────────────
+  # PostgreSQL 18.4
+  # ⚠️  PG18: VOLUME ใหม่คือ /var/lib/postgresql
+  #          (ไม่ใช่ /var/lib/postgresql/data แบบเดิม)
+  # ──────────────────────────────────────────
+  postgres:
+    image: postgres:18.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql   # PG18 path (ไม่ใช่ /data)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  # ──────────────────────────────────────────
+  # Redis 8.6.4
+  # ──────────────────────────────────────────
+  redis:
+    image: redis:8.6.4
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  # ──────────────────────────────────────────
+  # Python — FastAPI App (api + frontend router)
+  # codebase เดียว แยก router ด้วย APIRouter
+  # ──────────────────────────────────────────
+  app:
+    build:
+      context: .          # root ของ project
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  # ──────────────────────────────────────────
+  # Python — Background Worker
+  # build จาก codebase เดียวกัน เปลี่ยนแค่ CMD
+  # ──────────────────────────────────────────
+  worker:
+    build:
+      context: .          # root ของ project
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["uv", "run", "celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+
+# ──────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+
+# ──────────────────────────────────────────
+# Network
+# ──────────────────────────────────────────
+networks:
+  app_network:
+    driver: bridge
