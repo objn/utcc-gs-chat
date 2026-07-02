@@ -46,6 +46,14 @@ async def _broadcast(event: dict):
         q.put_nowait(event)
 
 
+SSE_CONNECTION_LIFETIME = 25  # seconds — EventSource auto-reconnects, so cap connection age
+# instead of streaming forever. An infinite stream is a connection uvicorn's
+# graceful shutdown will wait on indefinitely (it awaits open connections
+# closing *before* running lifespan shutdown, so a shutdown flag set from
+# lifespan can never reach an open stream in time — this bound sidesteps
+# that entirely rather than racing it).
+
+
 @router.get("/events")
 async def sse_events():
     queue: asyncio.Queue = asyncio.Queue()
@@ -53,9 +61,13 @@ async def sse_events():
 
     async def event_stream():
         try:
+            deadline = asyncio.get_event_loop().time() + SSE_CONNECTION_LIFETIME
             while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    return
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                    event = await asyncio.wait_for(queue.get(), timeout=min(remaining, 20))
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
@@ -622,6 +634,9 @@ async def _relay_to_webhub(session: AsyncSession, message: str, session_id: str)
 async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends(_get_session)):
     contact = await _get_or_create_contact(session, msg)
 
+    if msg.message:
+        session.add(Message(contact_id=contact.id, direction="in", text=msg.message))
+
     contact.last_message = msg.message[:1000] if msg.message else ""
     contact.last_message_at = datetime.utcnow().strftime("%H:%M")
     contact.updated_at = datetime.utcnow()
@@ -630,19 +645,23 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
     for kw in AGENT_DISABLE_KEYWORDS:
         if kw in msg.message:
             contact.agent_chat_enabled = False
+            contact_id_str = str(contact.id)
             await session.commit()
             await session.refresh(contact)
+            await _broadcast({"type": "update", "contact_id": contact_id_str})
             return {
-                "contact_id": str(contact.id),
+                "contact_id": contact_id_str,
                 "agent_chat_enabled": False,
                 "reply": None,
                 "reason": "agent_disabled_by_keyword",
             }
 
     if not contact.agent_chat_enabled:
+        contact_id_str = str(contact.id)
         await session.commit()
+        await _broadcast({"type": "update", "contact_id": contact_id_str})
         return {
-            "contact_id": str(contact.id),
+            "contact_id": contact_id_str,
             "agent_chat_enabled": False,
             "reply": None,
             "reason": "agent_chat_off",
@@ -650,11 +669,17 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
 
     # Relay to webhub
     reply = await _relay_to_webhub(session, msg.message, msg.platform_id)
+    if reply:
+        session.add(Message(contact_id=contact.id, direction="out", text=reply))
+        contact.last_message = reply[:1000]
+        contact.last_message_at = datetime.utcnow().strftime("%H:%M")
 
+    contact_id_str = str(contact.id)
     await session.commit()
     await session.refresh(contact)
+    await _broadcast({"type": "update", "contact_id": contact_id_str})
     return {
-        "contact_id": str(contact.id),
+        "contact_id": contact_id_str,
         "agent_chat_enabled": True,
         "reply": reply,
     }
