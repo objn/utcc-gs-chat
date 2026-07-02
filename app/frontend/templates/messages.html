@@ -252,11 +252,16 @@ async function refreshContactList() {
     }
 }
 
-// Real-time updates via SSE: the server pushes an event whenever a message
-// is sent or a webhook delivers one, instead of polling on a fixed interval.
+// Real-time updates via WebSocket: the server pushes an event whenever a
+// message is sent or a webhook delivers one, instead of polling. Unlike the
+// SSE version this replaced, the connection is held open indefinitely (no
+// forced reconnect cycle), so there's no gap where a fast-fired event gets
+// dropped between one connection closing and the next opening.
 function connectEventStream() {
-    const es = new EventSource('/api/v1/events');
-    es.onmessage = (evt) => {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(proto + '//' + location.host + '/api/v1/events');
+
+    ws.onmessage = (evt) => {
         let data;
         try { data = JSON.parse(evt.data); } catch (e) { return; }
         refreshContactList();
@@ -264,10 +269,15 @@ function connectEventStream() {
             pollCurrentConversation();
         }
     };
-    es.onerror = () => {
-        // EventSource auto-reconnects; nothing to do here.
+    ws.onclose = () => {
+        // The browser WebSocket API doesn't auto-reconnect like
+        // EventSource did — reconnect ourselves after a short delay.
+        setTimeout(connectEventStream, 2000);
     };
-    return es;
+    ws.onerror = () => {
+        ws.close();
+    };
+    return ws;
 }
 connectEventStream();
 

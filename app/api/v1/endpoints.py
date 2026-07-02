@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -8,8 +7,8 @@ from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -37,44 +36,41 @@ def _save_upload(file_bytes: bytes, filename: str) -> str:
 
 AGENT_DISABLE_KEYWORDS = ["ติดต่อเจ้าหน้าที่", "ขอคุยกับเจ้าหน้าที่", "ขอคุยกับคน"]
 
-# ── Live update broadcast (SSE) ──
+# ── Live update broadcast (WebSocket) ──
 # In-process pub/sub so /messages can get pushed updates instead of polling.
-# One asyncio.Queue per connected browser tab.
-_sse_subscribers: set[asyncio.Queue] = set()
+# One connected WebSocket per browser tab, held open indefinitely — unlike
+# the SSE version this replaced, there's no forced reconnect cycle, so
+# there's no gap where an event fires between one connection closing and
+# the next opening (that gap silently dropped events under SSE).
+_ws_subscribers: set[WebSocket] = set()
 
 
 async def _broadcast(event: dict):
-    for q in list(_sse_subscribers):
-        q.put_nowait(event)
-
-
-SSE_CONNECTION_LIFETIME = 25  # seconds — EventSource auto-reconnects, so cap connection age
-# instead of streaming forever. An infinite stream is a connection uvicorn's
-# graceful shutdown will wait on indefinitely (it awaits open connections
-# closing *before* running lifespan shutdown, so a shutdown flag set from
-# lifespan can never reach an open stream in time — this bound sidesteps
-# that entirely rather than racing it).
-
-
-@router.get("/events")
-async def sse_events():
-    queue: asyncio.Queue = asyncio.Queue()
-    _sse_subscribers.add(queue)
-
-    async def event_stream():
+    dead = []
+    for ws in list(_ws_subscribers):
         try:
-            deadline = asyncio.get_event_loop().time() + SSE_CONNECTION_LIFETIME
-            while True:
-                remaining = deadline - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    return
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=min(remaining, 20))
-                    yield f"data: {json.dumps(event)}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-        finally:
-            _sse_subscribers.discard(queue)
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_subscribers.discard(ws)
+
+
+@router.websocket("/events")
+async def ws_events(websocket: WebSocket):
+    await websocket.accept()
+    _ws_subscribers.add(websocket)
+    try:
+        while True:
+            # Nothing meaningful is expected from the client — this just
+            # blocks until the socket closes, so we can detect disconnects
+            # and clean up. Uvicorn answers ping/pong frames at the
+            # protocol level, so no app-level heartbeat is needed here.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_subscribers.discard(websocket)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
