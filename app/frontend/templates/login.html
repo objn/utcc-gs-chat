@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Login — GS Chat{% endblock %}
+
+{% block body %}
+<div class="login-wrapper">
+    <div class="login-card">
+        <div class="login-logo">
+            <div class="logo-icon">GS</div>
+            <h1>UTCC GS Chat</h1>
+            <div class="logo-sub">Graduate School — บัณฑิตวิทยาลัย</div>
+            <p>Management Console</p>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+
+        {% if success %}
+        <div class="alert alert-success">{{ success }}</div>
+        {% endif %}
+
+        <form action="/login" method="post">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" class="form-input" placeholder="admin@gs.utcc.ac.th" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" class="form-input" placeholder="••••••••" required>
+            </div>
+
+            <div class="form-footer">
+                <label>
+                    <input type="checkbox"> Remember me
+                </label>
+                <a href="#">Forgot password?</a>
+            </div>
+
+            <button type="submit" class="btn-primary">Sign in</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

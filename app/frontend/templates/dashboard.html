@@ -1,0 +1,175 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard — GS Chat{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="label">API Requests (Today)</span>
+            <div class="stat-icon orange">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            </div>
+        </div>
+        <div class="stat-value">12,847</div>
+        <div class="stat-change up">+18.2% from yesterday</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="label">Messages</span>
+            <div class="stat-icon green">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            </div>
+        </div>
+        <div class="stat-value">3,241</div>
+        <div class="stat-change up">+7.5% from yesterday</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="label">Active Pages</span>
+            <div class="stat-icon amber">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+            </div>
+        </div>
+        <div class="stat-value">5</div>
+        <div class="stat-change up">+1 this week</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="label">Webhook Success Rate</span>
+            <div class="stat-icon purple">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+        </div>
+        <div class="stat-value">99.8%</div>
+        <div class="stat-change up">Stable</div>
+    </div>
+</div>
+
+<!-- Charts + Activity -->
+<div class="content-grid">
+    <div class="card">
+        <div class="card-header">
+            <h3>API Traffic (7 Days)</h3>
+            <button class="btn btn-outline btn-sm">View Report</button>
+        </div>
+        <div class="card-body">
+            <div class="chart-placeholder">
+                <div class="chart-bar" style="height:45%"></div>
+                <div class="chart-bar" style="height:62%"></div>
+                <div class="chart-bar" style="height:38%"></div>
+                <div class="chart-bar" style="height:78%"></div>
+                <div class="chart-bar" style="height:55%"></div>
+                <div class="chart-bar" style="height:90%"></div>
+                <div class="chart-bar" style="height:72%"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Recent Activity</h3>
+        </div>
+        <div class="card-body">
+            <ul class="activity-list">
+                <li class="activity-item">
+                    <span class="activity-dot green"></span>
+                    <div>
+                        <div class="activity-text">Webhook <strong>message_received</strong> triggered successfully</div>
+                        <div class="activity-time">2 minutes ago</div>
+                    </div>
+                </li>
+                <li class="activity-item">
+                    <span class="activity-dot orange"></span>
+                    <div>
+                        <div class="activity-text">New message from <strong>GS UTCC Official</strong> page</div>
+                        <div class="activity-time">15 minutes ago</div>
+                    </div>
+                </li>
+                <li class="activity-item">
+                    <span class="activity-dot amber"></span>
+                    <div>
+                        <div class="activity-text">API rate limit warning — 85% usage on <strong>Page Token #3</strong></div>
+                        <div class="activity-time">1 hour ago</div>
+                    </div>
+                </li>
+                <li class="activity-item">
+                    <span class="activity-dot green"></span>
+                    <div>
+                        <div class="activity-text">Facebook page <strong>MBA UTCC</strong> connected</div>
+                        <div class="activity-time">3 hours ago</div>
+                    </div>
+                </li>
+                <li class="activity-item">
+                    <span class="activity-dot orange"></span>
+                    <div>
+                        <div class="activity-text">Auto-reply template <strong>"Welcome Message"</strong> updated</div>
+                        <div class="activity-time">5 hours ago</div>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Messages Table -->
+<div class="card">
+    <div class="card-header">
+        <h3>Recent Messages</h3>
+        <a href="/messages" class="btn btn-outline btn-sm">View All</a>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Sender</th>
+                    <th>Page</th>
+                    <th>Message</th>
+                    <th>Platform</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>สมชาย ใจดี</strong></td>
+                    <td>GS UTCC Official</td>
+                    <td>สนใจสมัครเรียน MBA ครับ ขอรายละเอียดหน่อย...</td>
+                    <td>Facebook</td>
+                    <td>2 min ago</td>
+                    <td><span class="status active"><span class="status-dot"></span>New</span></td>
+                </tr>
+                <tr>
+                    <td><strong>วิภา รักเรียน</strong></td>
+                    <td>MBA UTCC</td>
+                    <td>อยากทราบค่าเทอมปริญญาโทค่ะ</td>
+                    <td>Messenger</td>
+                    <td>18 min ago</td>
+                    <td><span class="status active"><span class="status-dot"></span>New</span></td>
+                </tr>
+                <tr>
+                    <td><strong>ธนกฤต พงษ์สวัสดิ์</strong></td>
+                    <td>GS UTCC Official</td>
+                    <td>ขอนัดพบอาจารย์ที่ปรึกษาครับ</td>
+                    <td>Facebook</td>
+                    <td>45 min ago</td>
+                    <td><span class="status online"><span class="status-dot"></span>Replied</span></td>
+                </tr>
+                <tr>
+                    <td><strong>ปิยะ มั่นคง</strong></td>
+                    <td>DBA UTCC</td>
+                    <td>เปิดรับสมัคร DBA รอบ 2 เมื่อไหร่ครับ</td>
+                    <td>Messenger</td>
+                    <td>2 hours ago</td>
+                    <td><span class="status online"><span class="status-dot"></span>Replied</span></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

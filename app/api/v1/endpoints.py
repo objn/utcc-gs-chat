@@ -1,8 +1,561 @@
-from fastapi import APIRouter
+import asyncio
+import json
+import logging
+import os
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+import httpx
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.db.session import engine
+from app.models.config import Config
+from app.models.contact import Contact
+from app.models.message import Message
 
 router = APIRouter()
+logger = logging.getLogger("gs_chat")
+
+GRAPH_API_BASE = "https://graph.facebook.com/v25.0"
+
+UPLOADS_DIR = Path(__file__).resolve().parents[3] / "app" / "frontend" / "static" / "uploads"
+
+
+def _save_upload(file_bytes: bytes, filename: str) -> str:
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    ext = Path(filename).suffix.lower()[:10]
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    (UPLOADS_DIR / safe_name).write_bytes(file_bytes)
+    return f"/static/uploads/{safe_name}"
+
+AGENT_DISABLE_KEYWORDS = ["ติดต่อเจ้าหน้าที่", "ขอคุยกับเจ้าหน้าที่", "ขอคุยกับคน"]
+
+# ── Live update broadcast (SSE) ──
+# In-process pub/sub so /messages can get pushed updates instead of polling.
+# One asyncio.Queue per connected browser tab.
+_sse_subscribers: set[asyncio.Queue] = set()
+
+
+async def _broadcast(event: dict):
+    for q in list(_sse_subscribers):
+        q.put_nowait(event)
+
+
+@router.get("/events")
+async def sse_events():
+    queue: asyncio.Queue = asyncio.Queue()
+    _sse_subscribers.add(queue)
+
+    async def event_stream():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            _sse_subscribers.discard(queue)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+async def _get_session():
+    async with AsyncSession(engine) as session:
+        yield session
+
+
+class ConfigPayload(BaseModel):
+    data: dict
+
+
+class IncomingMessage(BaseModel):
+    platform_id: str
+    platform: str = "facebook"
+    display_name: str = ""
+    page_id: str = ""
+    message: str = ""
+
+
+# ── Health ──
 
 
 @router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Config CRUD ──
+
+
+@router.get("/config/{config_id}")
+async def get_config(config_id: str, session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Config).where(Config.config_id == config_id, Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = result.first()
+    if not cfg:
+        return {"config_id": config_id, "data": {}}
+    return {"config_id": cfg.config_id, "data": cfg.data, "updated_at": cfg.updated_at.isoformat()}
+
+
+@router.put("/config/{config_id}")
+async def upsert_config(config_id: str, payload: ConfigPayload, session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Config).where(Config.config_id == config_id, Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = result.first()
+
+    if cfg:
+        cfg.data = payload.data
+        cfg.updated_at = datetime.utcnow()
+    else:
+        cfg = Config(config_id=config_id, data=payload.data)
+        session.add(cfg)
+
+    await session.commit()
+    await session.refresh(cfg)
+    return {"config_id": cfg.config_id, "data": cfg.data, "updated_at": cfg.updated_at.isoformat()}
+
+
+@router.delete("/config/{config_id}")
+async def delete_config(config_id: str, session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Config).where(Config.config_id == config_id, Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = result.first()
+    if not cfg:
+        return {"ok": False, "detail": "not found"}
+    cfg.deleted_at = datetime.utcnow()
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/graph-api/test-connection")
+async def graph_api_test_connection(session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = result.first()
+    page_token = cfg.data.get("page_access_token", "") if cfg else ""
+
+    if not page_token:
+        return {"ok": False, "error": "Page Access Token is not configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{GRAPH_API_BASE}/me",
+                params={"fields": "id,name", "access_token": page_token},
+            )
+        body = resp.json()
+        if resp.status_code != 200:
+            return {"ok": False, "error": body.get("error", {}).get("message", "Connection failed")}
+        return {"ok": True, "id": body.get("id"), "name": body.get("name")}
+    except Exception as e:
+        logger.error("Graph API test-connection failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+# ── Contacts ──
+
+
+@router.get("/contacts")
+async def list_contacts(session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Contact).where(Contact.deleted_at.is_(None)).order_by(Contact.updated_at.desc()))  # type: ignore[arg-type]
+    contacts = result.all()
+    return [
+        {
+            "id": str(c.id),
+            "platform_id": c.platform_id,
+            "platform": c.platform,
+            "display_name": c.display_name,
+            "avatar_color": c.avatar_color,
+            "avatar_url": c.avatar_url,
+            "agent_chat_enabled": c.agent_chat_enabled,
+            "last_message": c.last_message,
+            "last_message_at": c.last_message_at,
+        }
+        for c in contacts
+    ]
+
+
+@router.patch("/contacts/{contact_id}/agent-chat")
+async def toggle_agent_chat(contact_id: str, session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Contact).where(Contact.id == contact_id, Contact.deleted_at.is_(None)))  # type: ignore[arg-type]
+    contact = result.first()
+    if not contact:
+        return {"ok": False, "detail": "not found"}
+    contact.agent_chat_enabled = not contact.agent_chat_enabled
+    contact.updated_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(contact)
+    return {"ok": True, "agent_chat_enabled": contact.agent_chat_enabled}
+
+
+@router.put("/contacts/{contact_id}/agent-chat/{state}")
+async def set_agent_chat(contact_id: str, state: str, session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Contact).where(Contact.id == contact_id, Contact.deleted_at.is_(None)))  # type: ignore[arg-type]
+    contact = result.first()
+    if not contact:
+        return {"ok": False, "detail": "not found"}
+    contact.agent_chat_enabled = state == "on"
+    contact.updated_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(contact)
+    return {"ok": True, "agent_chat_enabled": contact.agent_chat_enabled}
+
+
+@router.get("/contacts/{contact_id}/messages")
+async def list_messages(contact_id: str, session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(
+        select(Message).where(Message.contact_id == contact_id).order_by(Message.created_at.asc())  # type: ignore[arg-type]
+    )
+    messages = result.all()
+    return [
+        {
+            "id": str(m.id),
+            "direction": m.direction,
+            "text": m.text,
+            "attachment_type": m.attachment_type,
+            "attachment_url": m.attachment_url,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in messages
+    ]
+
+
+@router.post("/contacts/{contact_id}/messages")
+async def send_message(
+    contact_id: str,
+    text: str | None = Form(default=None),
+    file: UploadFile | None = File(default=None),
+    session: AsyncSession = Depends(_get_session),
+):
+    result = await session.exec(select(Contact).where(Contact.id == contact_id, Contact.deleted_at.is_(None)))  # type: ignore[arg-type]
+    contact = result.first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    cfg_result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = cfg_result.first()
+    page_token = cfg.data.get("page_access_token", "") if cfg else ""
+    if not page_token:
+        raise HTTPException(status_code=400, detail="Graph API is not configured")
+
+    text = (text or "").strip()
+    created: list[Message] = []
+
+    if file is not None and file.filename:
+        content_type = file.content_type or ""
+        attachment_type = "image" if content_type.startswith("image/") else "file"
+        file_bytes = await file.read()
+
+        try:
+            await _fb_send_attachment(contact.platform_id, file_bytes, file.filename, content_type, attachment_type, page_token)
+        except Exception as e:
+            logger.error("Facebook attachment send failed: %s", e)
+            raise HTTPException(status_code=502, detail=f"Failed to send attachment: {e}")
+
+        local_url = _save_upload(file_bytes, file.filename)
+        msg = Message(contact_id=contact.id, direction="out", attachment_type=attachment_type, attachment_url=local_url)
+        session.add(msg)
+        created.append(msg)
+        contact.last_message = "📎 Photo" if attachment_type == "image" else f"📎 {file.filename}"
+
+    if text:
+        try:
+            await _fb_send_text(contact.platform_id, text, page_token)
+        except Exception as e:
+            logger.error("Facebook text send failed: %s", e)
+            raise HTTPException(status_code=502, detail=f"Failed to send message: {e}")
+
+        msg = Message(contact_id=contact.id, direction="out", text=text)
+        session.add(msg)
+        created.append(msg)
+        contact.last_message = text[:1000]
+
+    if not created:
+        raise HTTPException(status_code=400, detail="Provide text or a file to send")
+
+    contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+    contact.updated_at = datetime.utcnow()
+    contact_id_str = str(contact.id)
+
+    await session.commit()
+    for msg in created:
+        await session.refresh(msg)
+
+    await _broadcast({"type": "update", "contact_id": contact_id_str})
+
+    return [
+        {
+            "id": str(m.id),
+            "direction": m.direction,
+            "text": m.text,
+            "attachment_type": m.attachment_type,
+            "attachment_url": m.attachment_url,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in created
+    ]
+
+
+# ── Facebook Webhook ──
+
+
+@router.get("/webhook/facebook")
+async def facebook_verify(request: Request, session: AsyncSession = Depends(_get_session)):
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    # env var takes priority, fallback to DB config
+    verify_token = os.getenv("FB_VERIFY_TOKEN", "")
+    if not verify_token:
+        result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+        cfg = result.first()
+        verify_token = cfg.data.get("verify_token", "") if cfg else ""
+
+    if mode == "subscribe" and token == verify_token:
+        logger.info("Facebook webhook verified")
+        return PlainTextResponse(challenge or "")
+
+    logger.warning("Facebook webhook verification failed: mode=%s token_match=%s", mode, token == verify_token)
+    return PlainTextResponse("Forbidden", status_code=403)
+
+
+@router.post("/webhook/facebook")
+async def facebook_webhook(request: Request, session: AsyncSession = Depends(_get_session)):
+    body = await request.json()
+
+    if body.get("object") != "page":
+        return {"status": "ignored"}
+
+    cfg_result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = cfg_result.first()
+    page_token = cfg.data.get("page_access_token", "") if cfg else ""
+
+    for entry in body.get("entry", []):
+        for event in entry.get("messaging", []):
+            message_data = event.get("message", {})
+            if message_data.get("is_echo"):
+                continue
+
+            sender_id = event.get("sender", {}).get("id", "")
+            page_id = event.get("recipient", {}).get("id", "")
+            message_text = message_data.get("text", "")
+            attachments = message_data.get("attachments", [])
+
+            if not sender_id or (not message_text and not attachments):
+                continue
+
+            msg = IncomingMessage(
+                platform_id=sender_id,
+                platform="facebook",
+                display_name=sender_id,
+                page_id=page_id,
+                message=message_text,
+            )
+            contact = await _get_or_create_contact(session, msg, page_token)
+
+            if message_text:
+                session.add(Message(contact_id=contact.id, direction="in", text=message_text))
+                contact.last_message = message_text[:1000]
+
+            for att in attachments:
+                att_type = att.get("type", "file")
+                att_url = att.get("payload", {}).get("url", "")
+                session.add(Message(contact_id=contact.id, direction="in", attachment_type=att_type, attachment_url=att_url))
+                if not message_text:
+                    contact.last_message = "📎 Photo" if att_type == "image" else f"📎 {att_type.title()}"
+
+            contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+            contact.updated_at = datetime.utcnow()
+
+            for kw in AGENT_DISABLE_KEYWORDS:
+                if kw in message_text:
+                    contact.agent_chat_enabled = False
+                    break
+
+            reply = None
+            if message_text and contact.agent_chat_enabled:
+                reply = await _relay_to_webhub(session, message_text)
+
+            if reply and page_token:
+                try:
+                    await _fb_send_text(sender_id, reply, page_token)
+                    session.add(Message(contact_id=contact.id, direction="out", text=reply))
+                except Exception as e:
+                    logger.error("Facebook send failed: %s", e)
+
+            contact_id_str = str(contact.id)
+            await session.commit()
+            await _broadcast({"type": "update", "contact_id": contact_id_str})
+
+    return {"status": "ok"}
+
+
+def _raise_for_graph_error(resp: httpx.Response):
+    if resp.status_code == 200:
+        return
+    try:
+        detail = resp.json().get("error", {}).get("message", resp.text)
+    except Exception:
+        detail = resp.text
+    raise RuntimeError(detail)
+
+
+async def _fb_send_text(recipient_id: str, text: str, page_token: str):
+    url = f"{GRAPH_API_BASE}/me/messages?access_token={page_token}"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": text},
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(url, json=payload)
+    _raise_for_graph_error(resp)
+
+
+async def _fb_send_attachment(
+    recipient_id: str,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str,
+    attachment_type: str,
+    page_token: str,
+):
+    url = f"{GRAPH_API_BASE}/me/messages?access_token={page_token}"
+    data = {
+        "recipient": '{"id":"%s"}' % recipient_id,
+        "message": '{"attachment":{"type":"%s","payload":{}}}' % attachment_type,
+    }
+    files = {"filedata": (filename, file_bytes, content_type or "application/octet-stream")}
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(url, data=data, files=files)
+    _raise_for_graph_error(resp)
+
+
+# ── Webhook: incoming message (generic) ──
+
+
+async def _fetch_fb_profile(psid: str, page_token: str) -> dict | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{GRAPH_API_BASE}/{psid}",
+                params={"fields": "first_name,last_name,profile_pic", "access_token": page_token},
+            )
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+        name = " ".join(filter(None, [body.get("first_name"), body.get("last_name")])).strip()
+        return {"name": name or None, "avatar_url": body.get("profile_pic")}
+    except Exception as e:
+        logger.error("Failed to fetch Facebook profile: %s", e)
+        return None
+
+
+async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, page_token: str | None = None) -> Contact:
+    result = await session.exec(
+        select(Contact).where(
+            Contact.platform_id == msg.platform_id,
+            Contact.platform == msg.platform,
+            Contact.deleted_at.is_(None),  # type: ignore[arg-type]
+        )
+    )
+    contact = result.first()
+    if not contact:
+        colors = ["#1877f2", "#e74c3c", "#27ae60", "#8e44ad", "#f39c12", "#2c3e50", "#16a085", "#d35400"]
+        import hashlib
+        idx = int(hashlib.md5(msg.platform_id.encode()).hexdigest(), 16) % len(colors)
+
+        display_name = msg.display_name or msg.platform_id
+        avatar_url = None
+        if page_token and msg.platform == "facebook":
+            profile = await _fetch_fb_profile(msg.platform_id, page_token)
+            if profile:
+                if profile["name"]:
+                    display_name = profile["name"]
+                avatar_url = profile["avatar_url"]
+
+        contact = Contact(
+            platform_id=msg.platform_id,
+            platform=msg.platform,
+            display_name=display_name,
+            avatar_color=colors[idx],
+            avatar_url=avatar_url,
+            page_id=msg.page_id,
+            agent_chat_enabled=True,
+        )
+        session.add(contact)
+        await session.commit()
+        await session.refresh(contact)
+    return contact
+
+
+async def _relay_to_webhub(session: AsyncSession, message: str) -> str | None:
+    result = await session.exec(select(Config).where(Config.config_id == "webhub_utcc", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = result.first()
+    if not cfg or not cfg.data.get("base_url"):
+        return None
+
+    base_url = cfg.data["base_url"].rstrip("/")
+    headers = {}
+    if cfg.data.get("api_token"):
+        headers["Authorization"] = f"Bearer {cfg.data['api_token']}"
+
+    timeout = int(cfg.data.get("timeout", 30))
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url}/messages/send",
+                json={"message": message},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            return body.get("reply") or body.get("message") or body.get("text")
+    except Exception as e:
+        logger.error("Webhub relay failed: %s", e)
+        return None
+
+
+@router.post("/webhook/incoming")
+async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends(_get_session)):
+    contact = await _get_or_create_contact(session, msg)
+
+    contact.last_message = msg.message[:1000] if msg.message else ""
+    contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+    contact.updated_at = datetime.utcnow()
+
+    # Check for agent-disable keyword
+    for kw in AGENT_DISABLE_KEYWORDS:
+        if kw in msg.message:
+            contact.agent_chat_enabled = False
+            await session.commit()
+            await session.refresh(contact)
+            return {
+                "contact_id": str(contact.id),
+                "agent_chat_enabled": False,
+                "reply": None,
+                "reason": "agent_disabled_by_keyword",
+            }
+
+    if not contact.agent_chat_enabled:
+        await session.commit()
+        return {
+            "contact_id": str(contact.id),
+            "agent_chat_enabled": False,
+            "reply": None,
+            "reason": "agent_chat_off",
+        }
+
+    # Relay to webhub
+    reply = await _relay_to_webhub(session, msg.message)
+
+    await session.commit()
+    await session.refresh(contact)
+    return {
+        "contact_id": str(contact.id),
+        "agent_chat_enabled": True,
+        "reply": reply,
+    }

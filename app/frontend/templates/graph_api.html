@@ -1,0 +1,152 @@
+{% extends "layout.html" %}
+
+{% block title %}Graph API — GS Chat{% endblock %}
+{% block page_title %}Facebook Graph API{% endblock %}
+
+{% block content %}
+<!-- Connection Status -->
+{% if config.data and config.data.app_id %}
+<div class="api-status-bar">
+    <span class="status-dot" style="width:10px;height:10px;border-radius:50%;background:#10b981;"></span>
+    <span class="status-text">Connected to Facebook Graph API v25.0</span>
+    <span style="margin-left:auto; font-size:13px; color:var(--text-muted);">App ID: {{ config.data.app_id }}</span>
+</div>
+{% else %}
+<div class="api-status-bar disconnected">
+    <span class="status-dot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;"></span>
+    <span class="status-text">Not configured</span>
+    <span style="margin-left:auto; font-size:13px; color:var(--text-muted);">Fill in the configuration below to connect</span>
+</div>
+{% endif %}
+
+<!-- Config Form -->
+<form method="post" action="/graph-api">
+    <div class="config-grid" style="margin-bottom:24px;">
+        <div class="card">
+            <div class="card-header">
+                <h3>App Configuration</h3>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="app_id">App ID</label>
+                    <input type="text" id="app_id" name="app_id" class="form-input"
+                           placeholder="1234567890123456"
+                           value="{{ config.data.app_id or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="app_secret">App Secret</label>
+                    <input type="password" id="app_secret" name="app_secret" class="form-input"
+                           placeholder="••••••••"
+                           value="{{ config.data.app_secret or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="page_access_token">Page Access Token</label>
+                    <input type="password" id="page_access_token" name="page_access_token" class="form-input"
+                           placeholder="EAAxxxxxxx..."
+                           value="{{ config.data.page_access_token or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="verify_token">Webhook Verify Token</label>
+                    <input type="text" id="verify_token" name="verify_token" class="form-input"
+                           placeholder="gs_chat_verify_2024"
+                           value="{{ config.data.verify_token or '' }}">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Webhook & Pages</h3>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="webhook_url">Webhook Callback URL</label>
+                    <input type="url" id="webhook_url" name="webhook_url" class="form-input"
+                           placeholder="https://api.gs-chat.utcc.ac.th/webhook/facebook"
+                           value="{{ config.data.webhook_url or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="page_id">Page ID</label>
+                    <input type="text" id="page_id" name="page_id" class="form-input"
+                           placeholder="109876543210987"
+                           value="{{ config.data.page_id or '' }}">
+                </div>
+
+                <div style="margin-top:12px;">
+                    <label style="font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; display:block;">Subscribed Fields</label>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                        {% set fields = (config.data.subscribed_fields or 'messages,messaging_postbacks,message_deliveries,message_reads').split(',') %}
+                        {% for f in ['messages','messaging_postbacks','message_deliveries','message_reads','feed'] %}
+                        <label style="display:flex; align-items:center; gap:4px; font-size:13px; padding:4px 10px; border:1px solid var(--border); border-radius:6px; cursor:pointer;">
+                            <input type="checkbox" name="subscribed_fields" value="{{ f }}" {{ 'checked' if f in fields else '' }} style="accent-color:var(--primary);">
+                            {{ f }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                {% if config.updated_at %}
+                <div style="margin-top:16px; padding:12px; background:var(--bg-main); border-radius:8px;">
+                    <span style="font-size:12px; color:var(--text-muted);">Last saved:</span>
+                    <span style="font-size:12px; font-weight:600;">{{ config.updated_at.strftime('%Y-%m-%d %H:%M:%S') if config.updated_at else '—' }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if save_success %}
+    <div class="alert alert-success" style="margin-bottom:20px;">Configuration saved successfully.</div>
+    {% endif %}
+
+    <div style="display:flex; align-items:center; gap:12px;">
+        <button type="submit" class="btn btn-filled">Save Configuration</button>
+        <button type="button" class="btn btn-outline" onclick="testConnection()" id="testConnBtn">Test Connection</button>
+        <span id="testResult" style="font-size:13px;"></span>
+    </div>
+</form>
+
+<script>
+async function testConnection() {
+    const btn = document.getElementById('testConnBtn');
+    const resultEl = document.getElementById('testResult');
+    btn.disabled = true;
+    resultEl.style.color = 'var(--text-muted)';
+    resultEl.textContent = 'Testing...';
+
+    try {
+        const res = await fetch('/api/v1/graph-api/test-connection', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            resultEl.style.color = '#10b981';
+            resultEl.textContent = 'Connected as "' + data.name + '" (ID: ' + data.id + ')';
+        } else {
+            resultEl.style.color = '#ef4444';
+            resultEl.textContent = data.error || 'Connection failed';
+        }
+    } catch (e) {
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = 'Request failed: ' + e;
+    } finally {
+        btn.disabled = false;
+    }
+}
+</script>
+
+<!-- Permissions Reference -->
+<div class="card" style="margin-top:24px;">
+    <div class="card-header">
+        <h3>Required Permissions</h3>
+    </div>
+    <div class="card-body">
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            <span class="status online">pages_messaging</span>
+            <span class="status online">pages_read_engagement</span>
+            <span class="status online">pages_manage_metadata</span>
+            <span class="status online">pages_read_user_content</span>
+            <span class="status online">pages_show_list</span>
+            <span class="status pending">leads_retrieval</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

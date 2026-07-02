@@ -1,0 +1,136 @@
+{% extends "layout.html" %}
+
+{% block title %}Webhub UTCC — GS Chat{% endblock %}
+{% block page_title %}Webhub UTCC API{% endblock %}
+
+{% block content %}
+<!-- Connection Status -->
+{% if config.data and config.data.base_url %}
+<div class="api-status-bar">
+    <span class="status-dot" style="width:10px;height:10px;border-radius:50%;background:#10b981;"></span>
+    <span class="status-text">Connected to Webhub UTCC</span>
+    <span style="margin-left:auto; font-size:13px; color:var(--text-muted);">{{ config.data.base_url }}</span>
+</div>
+{% else %}
+<div class="api-status-bar disconnected">
+    <span class="status-dot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;"></span>
+    <span class="status-text">Not configured</span>
+    <span style="margin-left:auto; font-size:13px; color:var(--text-muted);">Fill in the configuration below to connect</span>
+</div>
+{% endif %}
+
+<!-- Config Form -->
+<form method="post" action="/webhub">
+    <div class="config-grid" style="margin-bottom:24px;">
+        <div class="card">
+            <div class="card-header">
+                <h3>API Connection</h3>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="base_url">Base URL</label>
+                    <input type="url" id="base_url" name="base_url" class="form-input"
+                           placeholder="https://webhub.utcc.ac.th/api"
+                           value="{{ config.data.base_url or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="api_token">API Token</label>
+                    <input type="text" id="api_token" name="api_token" class="form-input"
+                           placeholder="Bearer token or API key"
+                           value="{{ config.data.api_token or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" class="form-input"
+                           placeholder="service account username"
+                           value="{{ config.data.username or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" class="form-input"
+                           placeholder="••••••••"
+                           value="{{ config.data.password or '' }}">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Options</h3>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="timeout">Request Timeout (seconds)</label>
+                    <input type="number" id="timeout" name="timeout" class="form-input"
+                           placeholder="30"
+                           value="{{ config.data.timeout or '30' }}">
+                </div>
+                <div class="form-group">
+                    <label for="webhook_path">Incoming Webhook Path</label>
+                    <input type="text" id="webhook_path" name="webhook_path" class="form-input"
+                           placeholder="/webhook/webhub"
+                           value="{{ config.data.webhook_path or '/webhook/webhub' }}">
+                </div>
+                <div class="form-group">
+                    <label for="sync_interval">Sync Interval (minutes)</label>
+                    <input type="number" id="sync_interval" name="sync_interval" class="form-input"
+                           placeholder="5"
+                           value="{{ config.data.sync_interval or '5' }}">
+                </div>
+
+                {% if config.updated_at %}
+                <div style="margin-top:16px; padding:12px; background:var(--bg-main); border-radius:8px;">
+                    <span style="font-size:12px; color:var(--text-muted);">Last saved:</span>
+                    <span style="font-size:12px; font-weight:600;">{{ config.updated_at.strftime('%Y-%m-%d %H:%M:%S') if config.updated_at else '—' }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if save_success %}
+    <div class="alert alert-success" style="margin-bottom:20px;">Configuration saved successfully.</div>
+    {% endif %}
+
+    <div style="display:flex; gap:12px;">
+        <button type="submit" class="btn btn-filled">Save Configuration</button>
+        <button type="button" class="btn btn-outline" onclick="if(confirm('Test connection to Webhub API?')) alert('Connection test — coming soon');">Test Connection</button>
+    </div>
+</form>
+
+<!-- Endpoints Reference -->
+<div class="card" style="margin-top:24px;">
+    <div class="card-header">
+        <h3>Webhub API Endpoints</h3>
+    </div>
+    <div class="card-body">
+        <ul class="webhook-log">
+            <li>
+                <span class="webhook-method">GET</span>
+                <span class="webhook-path">/api/messages</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Fetch incoming messages</span>
+            </li>
+            <li>
+                <span class="webhook-method post">POST</span>
+                <span class="webhook-path">/api/messages/send</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Send a reply message</span>
+            </li>
+            <li>
+                <span class="webhook-method">GET</span>
+                <span class="webhook-path">/api/contacts</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">List contacts / students</span>
+            </li>
+            <li>
+                <span class="webhook-method">GET</span>
+                <span class="webhook-path">/api/conversations</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">List conversation threads</span>
+            </li>
+            <li>
+                <span class="webhook-method post">POST</span>
+                <span class="webhook-path">/api/webhook/subscribe</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Subscribe to real-time events</span>
+            </li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
