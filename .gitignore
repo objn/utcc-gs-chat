@@ -1,3 +1,22 @@
+# ── Environment / secrets ──
 .env
 .venv
 .claude
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ── App uploads ──
+app/frontend/static/uploads/
+
+# ── Editor / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
