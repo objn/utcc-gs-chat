@@ -10,11 +10,12 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.redis import get_redis_url
-from app.core.time import bangkok_now_str
+from app.core.time import bangkok_day_start_utc, bangkok_now_str
 from app.db.session import engine
 from app.models.config import Config
 from app.models.contact import Contact
@@ -99,6 +100,86 @@ class IncomingMessage(BaseModel):
 @router.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Dashboard ──
+
+
+@router.get("/dashboard/stats")
+async def dashboard_stats(session: AsyncSession = Depends(_get_session)):
+    total_conversations = (
+        await session.exec(select(func.count()).select_from(Contact).where(Contact.deleted_at.is_(None)))  # type: ignore[arg-type]
+    ).one()
+    agent_active = (
+        await session.exec(
+            select(func.count()).select_from(Contact).where(Contact.deleted_at.is_(None), Contact.agent_chat_enabled.is_(True))  # type: ignore[arg-type]
+        )
+    ).one()
+
+    today_start = bangkok_day_start_utc(0)
+    messages_today = (
+        await session.exec(select(func.count()).select_from(Message).where(Message.created_at >= today_start))
+    ).one()
+    messages_in_today = (
+        await session.exec(
+            select(func.count()).select_from(Message).where(Message.created_at >= today_start, Message.direction == "in")
+        )
+    ).one()
+    messages_out_today = (
+        await session.exec(
+            select(func.count()).select_from(Message).where(Message.created_at >= today_start, Message.direction == "out")
+        )
+    ).one()
+
+    daily_counts = []
+    for days_ago in range(6, -1, -1):
+        start = bangkok_day_start_utc(days_ago)
+        end = bangkok_day_start_utc(days_ago - 1)
+        count = (
+            await session.exec(
+                select(func.count()).select_from(Message).where(Message.created_at >= start, Message.created_at < end)
+            )
+        ).one()
+        daily_counts.append({"label": start.strftime("%d/%m"), "count": count})
+
+    graph_cfg_result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    graph_cfg = graph_cfg_result.first()
+    page_connected = bool(graph_cfg and graph_cfg.data.get("page_access_token"))
+
+    webhub_cfg_result = await session.exec(select(Config).where(Config.config_id == "webhub_utcc", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    webhub_cfg = webhub_cfg_result.first()
+    webhub_connected = bool(webhub_cfg and webhub_cfg.data.get("base_url"))
+
+    recent_result = await session.exec(
+        select(Message, Contact)
+        .join(Contact, Message.contact_id == Contact.id)  # type: ignore[arg-type]
+        .order_by(Message.created_at.desc())  # type: ignore[attr-defined]
+        .limit(8)
+    )
+    recent_messages = [
+        {
+            "contact_id": str(contact.id),
+            "sender": contact.display_name,
+            "platform": contact.platform,
+            "direction": msg.direction,
+            "text": msg.text or ("📎 Photo" if msg.attachment_type == "image" else f"📎 {(msg.attachment_type or 'file').title()}" if msg.attachment_type else ""),
+            "created_at": msg.created_at.isoformat() + "Z",
+        }
+        for msg, contact in recent_result.all()
+    ]
+
+    return {
+        "total_conversations": total_conversations,
+        "agent_active": agent_active,
+        "agent_off": total_conversations - agent_active,
+        "messages_today": messages_today,
+        "messages_in_today": messages_in_today,
+        "messages_out_today": messages_out_today,
+        "daily_counts": daily_counts,
+        "page_connected": page_connected,
+        "webhub_connected": webhub_connected,
+        "recent_messages": recent_messages,
+    }
 
 
 # ── Config CRUD ──

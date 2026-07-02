@@ -8,46 +8,46 @@
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-header">
-            <span class="label">API Requests (Today)</span>
+            <span class="label">Messages Today</span>
             <div class="stat-icon orange">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            </div>
-        </div>
-        <div class="stat-value">12,847</div>
-        <div class="stat-change up">+18.2% from yesterday</div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-header">
-            <span class="label">Messages</span>
-            <div class="stat-icon green">
                 <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
             </div>
         </div>
-        <div class="stat-value">3,241</div>
-        <div class="stat-change up">+7.5% from yesterday</div>
+        <div class="stat-value" id="statMessagesToday">—</div>
+        <div class="stat-change" id="statMessagesBreakdown">&nbsp;</div>
     </div>
 
     <div class="stat-card">
         <div class="stat-header">
-            <span class="label">Active Pages</span>
-            <div class="stat-icon amber">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+            <span class="label">Total Conversations</span>
+            <div class="stat-icon green">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
         </div>
-        <div class="stat-value">5</div>
-        <div class="stat-change up">+1 this week</div>
+        <div class="stat-value" id="statConversations">—</div>
+        <div class="stat-change">&nbsp;</div>
     </div>
 
     <div class="stat-card">
         <div class="stat-header">
-            <span class="label">Webhook Success Rate</span>
+            <span class="label">Agent Chat Active</span>
+            <div class="stat-icon amber">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+        </div>
+        <div class="stat-value" id="statAgentActive">—</div>
+        <div class="stat-change" id="statAgentOff">&nbsp;</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-header">
+            <span class="label">Integrations</span>
             <div class="stat-icon purple">
                 <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             </div>
         </div>
-        <div class="stat-value">99.8%</div>
-        <div class="stat-change up">Stable</div>
+        <div class="stat-value" id="statIntegrations">—</div>
+        <div class="stat-change" id="statIntegrationsDetail">&nbsp;</div>
     </div>
 </div>
 
@@ -55,18 +55,17 @@
 <div class="content-grid">
     <div class="card">
         <div class="card-header">
-            <h3>API Traffic (7 Days)</h3>
-            <button class="btn btn-outline btn-sm">View Report</button>
+            <h3>Messages (7 Days)</h3>
         </div>
         <div class="card-body">
-            <div class="chart-placeholder">
-                <div class="chart-bar" style="height:45%"></div>
-                <div class="chart-bar" style="height:62%"></div>
-                <div class="chart-bar" style="height:38%"></div>
-                <div class="chart-bar" style="height:78%"></div>
-                <div class="chart-bar" style="height:55%"></div>
-                <div class="chart-bar" style="height:90%"></div>
-                <div class="chart-bar" style="height:72%"></div>
+            <div class="chart-placeholder" id="chart7d">
+                <div class="chart-bar" style="height:4%"></div>
+                <div class="chart-bar" style="height:4%"></div>
+                <div class="chart-bar" style="height:4%"></div>
+                <div class="chart-bar" style="height:4%"></div>
+                <div class="chart-bar" style="height:4%"></div>
+                <div class="chart-bar" style="height:4%"></div>
+                <div class="chart-bar" style="height:4%"></div>
             </div>
         </div>
     </div>
@@ -76,42 +75,8 @@
             <h3>Recent Activity</h3>
         </div>
         <div class="card-body">
-            <ul class="activity-list">
-                <li class="activity-item">
-                    <span class="activity-dot green"></span>
-                    <div>
-                        <div class="activity-text">Webhook <strong>message_received</strong> triggered successfully</div>
-                        <div class="activity-time">2 minutes ago</div>
-                    </div>
-                </li>
-                <li class="activity-item">
-                    <span class="activity-dot orange"></span>
-                    <div>
-                        <div class="activity-text">New message from <strong>GS UTCC Official</strong> page</div>
-                        <div class="activity-time">15 minutes ago</div>
-                    </div>
-                </li>
-                <li class="activity-item">
-                    <span class="activity-dot amber"></span>
-                    <div>
-                        <div class="activity-text">API rate limit warning — 85% usage on <strong>Page Token #3</strong></div>
-                        <div class="activity-time">1 hour ago</div>
-                    </div>
-                </li>
-                <li class="activity-item">
-                    <span class="activity-dot green"></span>
-                    <div>
-                        <div class="activity-text">Facebook page <strong>MBA UTCC</strong> connected</div>
-                        <div class="activity-time">3 hours ago</div>
-                    </div>
-                </li>
-                <li class="activity-item">
-                    <span class="activity-dot orange"></span>
-                    <div>
-                        <div class="activity-text">Auto-reply template <strong>"Welcome Message"</strong> updated</div>
-                        <div class="activity-time">5 hours ago</div>
-                    </div>
-                </li>
+            <ul class="activity-list" id="activityList">
+                <li class="activity-item"><div class="activity-text">Loading...</div></li>
             </ul>
         </div>
     </div>
@@ -128,48 +93,122 @@
             <thead>
                 <tr>
                     <th>Sender</th>
-                    <th>Page</th>
                     <th>Message</th>
                     <th>Platform</th>
                     <th>Time</th>
                     <th>Status</th>
                 </tr>
             </thead>
-            <tbody>
-                <tr>
-                    <td><strong>สมชาย ใจดี</strong></td>
-                    <td>GS UTCC Official</td>
-                    <td>สนใจสมัครเรียน MBA ครับ ขอรายละเอียดหน่อย...</td>
-                    <td>Facebook</td>
-                    <td>2 min ago</td>
-                    <td><span class="status active"><span class="status-dot"></span>New</span></td>
-                </tr>
-                <tr>
-                    <td><strong>วิภา รักเรียน</strong></td>
-                    <td>MBA UTCC</td>
-                    <td>อยากทราบค่าเทอมปริญญาโทค่ะ</td>
-                    <td>Messenger</td>
-                    <td>18 min ago</td>
-                    <td><span class="status active"><span class="status-dot"></span>New</span></td>
-                </tr>
-                <tr>
-                    <td><strong>ธนกฤต พงษ์สวัสดิ์</strong></td>
-                    <td>GS UTCC Official</td>
-                    <td>ขอนัดพบอาจารย์ที่ปรึกษาครับ</td>
-                    <td>Facebook</td>
-                    <td>45 min ago</td>
-                    <td><span class="status online"><span class="status-dot"></span>Replied</span></td>
-                </tr>
-                <tr>
-                    <td><strong>ปิยะ มั่นคง</strong></td>
-                    <td>DBA UTCC</td>
-                    <td>เปิดรับสมัคร DBA รอบ 2 เมื่อไหร่ครับ</td>
-                    <td>Messenger</td>
-                    <td>2 hours ago</td>
-                    <td><span class="status online"><span class="status-dot"></span>Replied</span></td>
-                </tr>
+            <tbody id="recentMessagesBody">
+                <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Loading...</td></tr>
             </tbody>
         </table>
     </div>
 </div>
+
+<script>
+function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s || '';
+    return div.innerHTML;
+}
+
+function timeAgo(iso) {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + ' hour' + (hours > 1 ? 's' : '') + ' ago';
+    return Math.floor(hours / 24) + ' day(s) ago';
+}
+
+function clockTime(iso) {
+    try {
+        return new Date(iso).toLocaleTimeString('th-TH', {hour: '2-digit', minute: '2-digit'});
+    } catch (e) {
+        return '';
+    }
+}
+
+async function loadDashboardStats() {
+    try {
+        const res = await fetch('/api/v1/dashboard/stats');
+        const d = await res.json();
+
+        document.getElementById('statMessagesToday').textContent = d.messages_today;
+        document.getElementById('statMessagesBreakdown').textContent =
+            'In: ' + d.messages_in_today + ' · Out: ' + d.messages_out_today;
+
+        document.getElementById('statConversations').textContent = d.total_conversations;
+
+        document.getElementById('statAgentActive').textContent = d.agent_active;
+        document.getElementById('statAgentOff').textContent = d.agent_off + ' need manual reply';
+
+        const connectedCount = (d.page_connected ? 1 : 0) + (d.webhub_connected ? 1 : 0);
+        document.getElementById('statIntegrations').textContent = connectedCount + '/2';
+        document.getElementById('statIntegrationsDetail').innerHTML =
+            (d.page_connected ? '✅' : '⚠️') + ' Graph API &nbsp; ' + (d.webhub_connected ? '✅' : '⚠️') + ' Webhub';
+
+        // 7-day chart
+        const chart = document.getElementById('chart7d');
+        const maxCount = Math.max(1, ...d.daily_counts.map(x => x.count));
+        chart.innerHTML = d.daily_counts.map(x =>
+            '<div class="chart-bar" style="height:' + Math.max(4, Math.round(x.count / maxCount * 100)) + '%" title="' +
+            escapeHtml(x.label) + ': ' + x.count + '"></div>'
+        ).join('');
+
+        // Recent activity feed
+        const activityList = document.getElementById('activityList');
+        if (!d.recent_messages.length) {
+            activityList.innerHTML = '<li class="activity-item"><div class="activity-text">No messages yet.</div></li>';
+        } else {
+            activityList.innerHTML = d.recent_messages.slice(0, 5).map(m => {
+                const dot = m.direction === 'out' ? 'amber' : 'green';
+                const text = m.direction === 'out'
+                    ? 'Replied to <strong>' + escapeHtml(m.sender) + '</strong>'
+                    : 'New message from <strong>' + escapeHtml(m.sender) + '</strong>';
+                return '<li class="activity-item">' +
+                    '<span class="activity-dot ' + dot + '"></span>' +
+                    '<div><div class="activity-text">' + text + '</div>' +
+                    '<div class="activity-time">' + timeAgo(m.created_at) + '</div></div></li>';
+            }).join('');
+        }
+
+        // Recent messages table
+        const tbody = document.getElementById('recentMessagesBody');
+        if (!d.recent_messages.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No messages yet.</td></tr>';
+        } else {
+            tbody.innerHTML = d.recent_messages.map(m => {
+                const statusClass = m.direction === 'out' ? 'online' : 'active';
+                const statusText = m.direction === 'out' ? 'Replied' : 'New';
+                const preview = (m.text || '').length > 60 ? m.text.slice(0, 60) + '…' : (m.text || '');
+                return '<tr>' +
+                    '<td><strong>' + escapeHtml(m.sender) + '</strong></td>' +
+                    '<td>' + escapeHtml(preview) + '</td>' +
+                    '<td>' + escapeHtml(m.platform) + '</td>' +
+                    '<td>' + clockTime(m.created_at) + '</td>' +
+                    '<td><span class="status ' + statusClass + '"><span class="status-dot"></span>' + statusText + '</span></td>' +
+                    '</tr>';
+            }).join('');
+        }
+    } catch (e) {
+        console.error('Failed to load dashboard stats:', e);
+    }
+}
+
+loadDashboardStats();
+
+// Live refresh: reuse the same event stream /messages uses so the dashboard
+// updates the moment a webhook delivers a message or a reply is sent.
+function connectDashboardEvents() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(proto + '//' + location.host + '/api/v1/events');
+    ws.onmessage = () => loadDashboardStats();
+    ws.onclose = () => setTimeout(connectDashboardEvents, 2000);
+    ws.onerror = () => ws.close();
+}
+connectDashboardEvents();
+</script>
 {% endblock %}
