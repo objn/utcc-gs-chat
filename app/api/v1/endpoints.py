@@ -7,12 +7,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.redis import get_redis_url
 from app.db.session import engine
 from app.models.config import Config
 from app.models.contact import Contact
@@ -369,6 +371,28 @@ async def facebook_verify(request: Request, session: AsyncSession = Depends(_get
     return PlainTextResponse("Forbidden", status_code=403)
 
 
+async def _schedule_reply_flush(session: AsyncSession, contact_id: str, sender_id: str, message_text: str) -> None:
+    # Buffers this message and (re)schedules a debounced reply so a burst of
+    # quick messages from the same user gets answered once, after they stop
+    # sending — see flush_reply_task in app/worker/tasks.py.
+    from app.worker.tasks import flush_reply_task
+
+    cfg_result = await session.exec(select(Config).where(Config.config_id == "webhub_utcc", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = cfg_result.first()
+    debounce_seconds = int(cfg.data.get("debounce_seconds", 10)) if cfg else 10
+
+    client = aioredis.from_url(get_redis_url())
+    try:
+        gen = await client.incr(f"debounce:gen:{contact_id}")
+        await client.rpush(f"debounce:buf:{contact_id}", message_text)
+        await client.expire(f"debounce:buf:{contact_id}", 300)
+        await client.expire(f"debounce:gen:{contact_id}", 300)
+    finally:
+        await client.aclose()
+
+    flush_reply_task.apply_async(args=[contact_id, sender_id, gen], countdown=debounce_seconds)
+
+
 @router.post("/webhook/facebook")
 async def facebook_webhook(request: Request, session: AsyncSession = Depends(_get_session)):
     body = await request.json()
@@ -422,19 +446,13 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
                     contact.agent_chat_enabled = False
                     break
 
-            reply = None
-            if message_text and contact.agent_chat_enabled:
-                reply = await _relay_to_webhub(session, message_text, contact.platform_id)
-
-            if reply and page_token:
-                try:
-                    await _fb_send_text(sender_id, reply, page_token)
-                    session.add(Message(contact_id=contact.id, direction="out", text=reply))
-                except Exception as e:
-                    logger.error("Facebook send failed: %s", e)
-
             contact_id_str = str(contact.id)
+            agent_chat_enabled = contact.agent_chat_enabled
             await session.commit()
+
+            if message_text and agent_chat_enabled:
+                await _schedule_reply_flush(session, contact_id_str, sender_id, message_text)
+
             await _broadcast({"type": "update", "contact_id": contact_id_str})
 
     return {"status": "ok"}
@@ -491,6 +509,7 @@ async def _fetch_fb_profile(psid: str, page_token: str) -> dict | None:
                 params={"fields": "first_name,last_name,profile_pic", "access_token": page_token},
             )
         if resp.status_code != 200:
+            logger.error("Facebook profile fetch failed for %s: %s %s", psid, resp.status_code, resp.text)
             return None
         body = resp.json()
         name = " ".join(filter(None, [body.get("first_name"), body.get("last_name")])).strip()
@@ -535,6 +554,17 @@ async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, pa
         session.add(contact)
         await session.commit()
         await session.refresh(contact)
+    elif contact.display_name == contact.platform_id and page_token and msg.platform == "facebook":
+        # The profile fetch failed or had no token available when this
+        # contact was first created, so display_name fell back to the raw
+        # platform id. Retry it on a later message now that a token exists,
+        # instead of leaving the id stuck as the display name forever.
+        profile = await _fetch_fb_profile(msg.platform_id, page_token)
+        if profile and profile["name"]:
+            contact.display_name = profile["name"]
+            if profile["avatar_url"]:
+                contact.avatar_url = profile["avatar_url"]
+            session.add(contact)
     return contact
 
 
@@ -596,7 +626,7 @@ async def _get_webhub_token(session: AsyncSession, cfg: Config, force_refresh: b
     return token, faculty_id
 
 
-async def _relay_to_webhub(session: AsyncSession, message: str, session_id: str) -> str | None:
+async def _relay_to_webhub_or_raise(session: AsyncSession, message: str, session_id: str) -> str | None:
     result = await session.exec(select(Config).where(Config.config_id == "webhub_utcc", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
     cfg = result.first()
     if not cfg or not cfg.data.get("base_url") or not cfg.data.get("username"):
@@ -619,12 +649,16 @@ async def _relay_to_webhub(session: AsyncSession, message: str, session_id: str)
                 },
             )
 
+    resp = await _send(force_refresh=False)
+    if resp.status_code == 401:
+        resp = await _send(force_refresh=True)
+    resp.raise_for_status()
+    return resp.json().get("response")
+
+
+async def _relay_to_webhub(session: AsyncSession, message: str, session_id: str) -> str | None:
     try:
-        resp = await _send(force_refresh=False)
-        if resp.status_code == 401:
-            resp = await _send(force_refresh=True)
-        resp.raise_for_status()
-        return resp.json().get("response")
+        return await _relay_to_webhub_or_raise(session, message, session_id)
     except Exception as e:
         logger.error("Webhub relay failed: %s", e)
         return None

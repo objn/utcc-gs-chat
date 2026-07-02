@@ -13,7 +13,13 @@
 
         <div id="contactList">
         {% for c in contacts %}
-        <div class="msg-item {% if loop.first %}active{% endif %}" data-id="{{ c.id }}" onclick="selectContact(this, '{{ c.id }}', {{ c.display_name | tojson }}, '{{ c.platform }}', {{ 'true' if c.agent_chat_enabled else 'false' }}, '{{ c.avatar_color }}', {{ (c.avatar_url or '') | tojson }})">
+        <div class="msg-item {% if loop.first %}active{% endif %}"
+             data-id="{{ c.id }}"
+             data-name="{{ c.display_name }}"
+             data-platform="{{ c.platform }}"
+             data-agent="{{ 'true' if c.agent_chat_enabled else 'false' }}"
+             data-color="{{ c.avatar_color }}"
+             data-avatar="{{ c.avatar_url or '' }}">
             {% if c.avatar_url %}
             <img class="msg-avatar" src="{{ c.avatar_url }}">
             {% else %}
@@ -290,6 +296,15 @@ function selectContact(el, id, name, platform, agentEnabled, color, avatarUrl) {
 if (currentContactId) {
     loadMessages(currentContactId);
 }
+
+// Server-rendered list items use data-* attributes (not inline onclick,
+// which breaks on names containing quotes) — wire clicks up here.
+document.querySelectorAll('#contactList .msg-item[data-id]').forEach(item => {
+    item.addEventListener('click', () => selectContact(
+        item, item.dataset.id, item.dataset.name, item.dataset.platform,
+        item.dataset.agent === 'true', item.dataset.color, item.dataset.avatar || null
+    ));
+});
 
 function updateToggleLabel(enabled) {
     const label = document.getElementById('toggleLabel');

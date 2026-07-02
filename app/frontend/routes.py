@@ -235,6 +235,7 @@ async def webhub_save(request: Request, session: AsyncSession = Depends(_get_ses
         "timeout": str(form.get("timeout", "30")).strip(),
         "webhook_path": str(form.get("webhook_path", "/webhook/webhub")).strip(),
         "sync_interval": str(form.get("sync_interval", "5")).strip(),
+        "debounce_seconds": str(form.get("debounce_seconds", "10")).strip(),
     }
 
     config = await _save_config(session, "webhub_utcc", data)
