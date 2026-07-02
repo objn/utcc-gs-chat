@@ -14,6 +14,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.redis import get_redis_url
+from app.core.time import bangkok_now_str
 from app.db.session import engine
 from app.models.config import Config
 from app.models.contact import Contact
@@ -229,7 +230,6 @@ async def toggle_agent_chat(contact_id: str, session: AsyncSession = Depends(_ge
     if not contact:
         return {"ok": False, "detail": "not found"}
     contact.agent_chat_enabled = not contact.agent_chat_enabled
-    contact.updated_at = datetime.utcnow()
     await session.commit()
     await session.refresh(contact)
     return {"ok": True, "agent_chat_enabled": contact.agent_chat_enabled}
@@ -242,7 +242,6 @@ async def set_agent_chat(contact_id: str, state: str, session: AsyncSession = De
     if not contact:
         return {"ok": False, "detail": "not found"}
     contact.agent_chat_enabled = state == "on"
-    contact.updated_at = datetime.utcnow()
     await session.commit()
     await session.refresh(contact)
     return {"ok": True, "agent_chat_enabled": contact.agent_chat_enabled}
@@ -261,7 +260,7 @@ async def list_messages(contact_id: str, session: AsyncSession = Depends(_get_se
             "text": m.text,
             "attachment_type": m.attachment_type,
             "attachment_url": m.attachment_url,
-            "created_at": m.created_at.isoformat(),
+            "created_at": m.created_at.isoformat() + "Z",
         }
         for m in messages
     ]
@@ -320,7 +319,7 @@ async def send_message(
     if not created:
         raise HTTPException(status_code=400, detail="Provide text or a file to send")
 
-    contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+    contact.last_message_at = bangkok_now_str()
     contact.updated_at = datetime.utcnow()
     contact_id_str = str(contact.id)
 
@@ -337,7 +336,7 @@ async def send_message(
             "text": m.text,
             "attachment_type": m.attachment_type,
             "attachment_url": m.attachment_url,
-            "created_at": m.created_at.isoformat(),
+            "created_at": m.created_at.isoformat() + "Z",
         }
         for m in created
     ]
@@ -434,7 +433,7 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
                 if not message_text:
                     contact.last_message = "📎 Photo" if att_type == "image" else f"📎 {att_type.title()}"
 
-            contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+            contact.last_message_at = bangkok_now_str()
             contact.updated_at = datetime.utcnow()
 
             for kw in AGENT_DISABLE_KEYWORDS:
@@ -668,7 +667,7 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
         session.add(Message(contact_id=contact.id, direction="in", text=msg.message))
 
     contact.last_message = msg.message[:1000] if msg.message else ""
-    contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+    contact.last_message_at = bangkok_now_str()
     contact.updated_at = datetime.utcnow()
 
     # Check for agent-disable keyword
@@ -702,7 +701,7 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
     if reply:
         session.add(Message(contact_id=contact.id, direction="out", text=reply))
         contact.last_message = reply[:1000]
-        contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+        contact.last_message_at = bangkok_now_str()
 
     contact_id_str = str(contact.id)
     await session.commit()

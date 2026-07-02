@@ -74,6 +74,9 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 3000 --reload
 
 # Terminal 2 — Celery worker
 uv run celery -A app.worker.celery_app worker --loglevel=info
+
+# if run in windows
+uv run celery -A app.worker.celery_app worker --loglevel=info --pool=solo
 ```
 
 > **Windows note:** Celery's default `prefork` pool requires Unix `fork()`, which isn't available natively on Windows. Add `--pool=solo` (single-threaded) or `--pool=threads --concurrency=4` (parallel) to the worker command above. This isn't needed inside Docker, since the container runs Linux.

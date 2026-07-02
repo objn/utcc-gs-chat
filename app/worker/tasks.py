@@ -9,6 +9,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.redis import get_redis_url
+from app.core.time import bangkok_now_str
 from app.db.session import DATABASE_URL
 from app.models.config import Config
 from app.models.contact import Contact
@@ -113,7 +114,7 @@ async def _send_reply_async(contact_id: str, sender_id: str, combined_text: str,
 
             session.add(Message(contact_id=contact.id, direction="out", text=reply))
             contact.last_message = reply[:1000]
-            contact.last_message_at = datetime.utcnow().strftime("%H:%M")
+            contact.last_message_at = bangkok_now_str()
             contact.updated_at = datetime.utcnow()
             contact_id_str = str(contact.id)
 
