@@ -63,7 +63,7 @@ async def _resolve_combined_text(contact_id: str, generation: int) -> str | None
 
 
 async def _send_reply_async(contact_id: str, sender_id: str, combined_text: str, generation: int):
-    from app.api.v1.endpoints import _fb_send_text, _relay_to_webhub_or_raise
+    from app.api.v1.endpoints import CONTACT_STAFF_QUICK_REPLY, _fb_send_text, _relay_to_webhub_or_raise
 
     # Same reasoning as the Redis client above: build a fresh engine per
     # call rather than reusing app.db.session's shared singleton, since its
@@ -103,7 +103,7 @@ async def _send_reply_async(contact_id: str, sender_id: str, combined_text: str,
 
                 if page_token:
                     try:
-                        await _fb_send_text(sender_id, reply, page_token)
+                        await _fb_send_text(sender_id, reply, page_token, quick_replies=CONTACT_STAFF_QUICK_REPLY)
                     except Exception as e:
                         logger.error("Facebook send failed (worker): %s", e)
 

@@ -201,6 +201,8 @@ async def graph_api_save(request: Request, session: AsyncSession = Depends(_get_
         "webhook_url": str(form.get("webhook_url", "")).strip(),
         "page_id": str(form.get("page_id", "")).strip(),
         "subscribed_fields": ",".join(fields) if fields else "",
+        "welcome_message_enabled": form.get("welcome_message_enabled") == "on",
+        "welcome_message": str(form.get("welcome_message", "")).strip(),
     }
 
     config = await _save_config(session, "graph_api", data)

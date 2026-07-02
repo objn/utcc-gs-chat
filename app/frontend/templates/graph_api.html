@@ -56,6 +56,28 @@
 
         <div class="card">
             <div class="card-header">
+                <h3>Welcome Message</h3>
+            </div>
+            <div class="card-body">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:12px; cursor:pointer;">
+                    <input type="checkbox" name="welcome_message_enabled" value="on"
+                           {{ 'checked' if config.data.welcome_message_enabled else '' }}
+                           style="accent-color:var(--primary);">
+                    Send a welcome message on a contact's first chat
+                </label>
+                <div class="form-group">
+                    <label for="welcome_message">Message text</label>
+                    <textarea id="welcome_message" name="welcome_message" class="form-input" rows="4"
+                              placeholder="สวัสดีครับ ยินดีต้อนรับสู่ GS UTCC! มีอะไรให้ช่วยไหมครับ?">{{ config.data.welcome_message or '' }}</textarea>
+                </div>
+                <div style="font-size:12px; color:var(--text-muted);">
+                    Sent automatically the first time a contact messages the page, before their message is relayed to the bot as usual.
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
                 <h3>Webhook & Pages</h3>
             </div>
             <div class="card-body">

@@ -479,6 +479,11 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
     cfg_result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
     cfg = cfg_result.first()
     page_token = cfg.data.get("page_access_token", "") if cfg else ""
+    welcome_text_cfg = (
+        (cfg.data.get("welcome_message") or "").strip()
+        if cfg and cfg.data.get("welcome_message_enabled")
+        else ""
+    )
 
     for entry in body.get("entry", []):
         for event in entry.get("messaging", []):
@@ -501,7 +506,7 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
                 page_id=page_id,
                 message=message_text,
             )
-            contact = await _get_or_create_contact(session, msg, page_token)
+            contact, is_new_contact = await _get_or_create_contact(session, msg, page_token)
 
             if message_text:
                 session.add(Message(contact_id=contact.id, direction="in", text=message_text))
@@ -526,6 +531,14 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
             agent_chat_enabled = contact.agent_chat_enabled
             await session.commit()
 
+            if is_new_contact and page_token and welcome_text_cfg:
+                try:
+                    await _fb_send_text(sender_id, welcome_text_cfg, page_token, quick_replies=CONTACT_STAFF_QUICK_REPLY)
+                    session.add(Message(contact_id=contact.id, direction="out", text=welcome_text_cfg))
+                    await session.commit()
+                except Exception as e:
+                    logger.error("Failed to send welcome message: %s", e)
+
             if message_text and agent_chat_enabled:
                 await _schedule_reply_flush(session, contact_id_str, sender_id, message_text)
 
@@ -544,11 +557,21 @@ def _raise_for_graph_error(resp: httpx.Response):
     raise RuntimeError(detail)
 
 
-async def _fb_send_text(recipient_id: str, text: str, page_token: str):
+# Shown as a tappable quick-reply button under every automated bot message,
+# so a user can reach a human without having to type the disable keyword —
+# tapping it sends its title back as normal text, which AGENT_DISABLE_KEYWORDS
+# already matches (see facebook_webhook).
+CONTACT_STAFF_QUICK_REPLY = [{"content_type": "text", "title": "ติดต่อเจ้าหน้าที่", "payload": "CONTACT_STAFF"}]
+
+
+async def _fb_send_text(recipient_id: str, text: str, page_token: str, quick_replies: list[dict] | None = None):
     url = f"{GRAPH_API_BASE}/me/messages?access_token={page_token}"
+    message: dict = {"text": text}
+    if quick_replies:
+        message["quick_replies"] = quick_replies
     payload = {
         "recipient": {"id": recipient_id},
-        "message": {"text": text},
+        "message": message,
     }
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(url, json=payload)
@@ -595,7 +618,7 @@ async def _fetch_fb_profile(psid: str, page_token: str) -> dict | None:
         return None
 
 
-async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, page_token: str | None = None) -> Contact:
+async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, page_token: str | None = None) -> tuple[Contact, bool]:
     result = await session.exec(
         select(Contact).where(
             Contact.platform_id == msg.platform_id,
@@ -604,6 +627,7 @@ async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, pa
         )
     )
     contact = result.first()
+    is_new = not contact
     if not contact:
         colors = ["#1877f2", "#e74c3c", "#27ae60", "#8e44ad", "#f39c12", "#2c3e50", "#16a085", "#d35400"]
         import hashlib
@@ -641,7 +665,7 @@ async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, pa
             if profile["avatar_url"]:
                 contact.avatar_url = profile["avatar_url"]
             session.add(contact)
-    return contact
+    return contact, is_new
 
 
 def _decode_jwt_exp(token: str) -> datetime | None:
@@ -742,7 +766,7 @@ async def _relay_to_webhub(session: AsyncSession, message: str, session_id: str)
 
 @router.post("/webhook/incoming")
 async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends(_get_session)):
-    contact = await _get_or_create_contact(session, msg)
+    contact, _is_new_contact = await _get_or_create_contact(session, msg)
 
     if msg.message:
         session.add(Message(contact_id=contact.id, direction="in", text=msg.message))
