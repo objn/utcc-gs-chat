@@ -59,7 +59,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "${APP_PORT:-3000}:3000"
     volumes:
       - uploads_data:/app/app/frontend/static/uploads
     depends_on:

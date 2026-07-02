@@ -12,4 +12,4 @@ RUN uv sync --frozen --no-dev
 COPY . .
 
 # Override CMD in docker-compose per service
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3000"]
