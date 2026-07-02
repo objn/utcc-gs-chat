@@ -30,14 +30,8 @@
                 <div class="form-group">
                     <label for="base_url">Base URL</label>
                     <input type="url" id="base_url" name="base_url" class="form-input"
-                           placeholder="https://webhub.utcc.ac.th/api"
+                           placeholder="https://chat.utcc.ac.th/api"
                            value="{{ config.data.base_url or '' }}">
-                </div>
-                <div class="form-group">
-                    <label for="api_token">API Token</label>
-                    <input type="text" id="api_token" name="api_token" class="form-input"
-                           placeholder="Bearer token or API key"
-                           value="{{ config.data.api_token or '' }}">
                 </div>
                 <div class="form-group">
                     <label for="username">Username</label>
@@ -92,11 +86,39 @@
     <div class="alert alert-success" style="margin-bottom:20px;">Configuration saved successfully.</div>
     {% endif %}
 
-    <div style="display:flex; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
         <button type="submit" class="btn btn-filled">Save Configuration</button>
-        <button type="button" class="btn btn-outline" onclick="if(confirm('Test connection to Webhub API?')) alert('Connection test — coming soon');">Test Connection</button>
+        <button type="button" class="btn btn-outline" onclick="testConnection()" id="testConnBtn">Test Connection</button>
+        <span id="testResult" style="font-size:13px;"></span>
     </div>
 </form>
+
+<script>
+async function testConnection() {
+    const btn = document.getElementById('testConnBtn');
+    const resultEl = document.getElementById('testResult');
+    btn.disabled = true;
+    resultEl.style.color = 'var(--text-muted)';
+    resultEl.textContent = 'Testing...';
+
+    try {
+        const res = await fetch('/api/v1/webhub/test-connection', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            resultEl.style.color = '#10b981';
+            resultEl.textContent = 'Logged in as "' + data.username + '" — ' + data.faculty_name;
+        } else {
+            resultEl.style.color = '#ef4444';
+            resultEl.textContent = data.error || 'Connection failed';
+        }
+    } catch (e) {
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = 'Request failed: ' + e;
+    } finally {
+        btn.disabled = false;
+    }
+}
+</script>
 
 <!-- Endpoints Reference -->
 <div class="card" style="margin-top:24px;">
@@ -106,29 +128,14 @@
     <div class="card-body">
         <ul class="webhook-log">
             <li>
-                <span class="webhook-method">GET</span>
-                <span class="webhook-path">/api/messages</span>
-                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Fetch incoming messages</span>
+                <span class="webhook-method post">POST</span>
+                <span class="webhook-path">/api/auth/login</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Log in with username/password, returns a JWT (cached and auto-refreshed)</span>
             </li>
             <li>
                 <span class="webhook-method post">POST</span>
-                <span class="webhook-path">/api/messages/send</span>
-                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Send a reply message</span>
-            </li>
-            <li>
-                <span class="webhook-method">GET</span>
-                <span class="webhook-path">/api/contacts</span>
-                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">List contacts / students</span>
-            </li>
-            <li>
-                <span class="webhook-method">GET</span>
-                <span class="webhook-path">/api/conversations</span>
-                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">List conversation threads</span>
-            </li>
-            <li>
-                <span class="webhook-method post">POST</span>
-                <span class="webhook-path">/api/webhook/subscribe</span>
-                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Subscribe to real-time events</span>
+                <span class="webhook-path">/api/chat_webui/message</span>
+                <span style="color:var(--text-muted); font-size:12px; margin-left:8px;">Send a user message to the UTCC chatbot and get a reply</span>
             </li>
         </ul>
     </div>

@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -151,6 +151,41 @@ async def graph_api_test_connection(session: AsyncSession = Depends(_get_session
         return {"ok": True, "id": body.get("id"), "name": body.get("name")}
     except Exception as e:
         logger.error("Graph API test-connection failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/webhub/test-connection")
+async def webhub_test_connection(session: AsyncSession = Depends(_get_session)):
+    result = await session.exec(select(Config).where(Config.config_id == "webhub_utcc", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
+    cfg = result.first()
+
+    if not cfg or not cfg.data.get("base_url") or not cfg.data.get("username"):
+        return {"ok": False, "error": "Base URL / username / password are not configured"}
+
+    try:
+        base_url = cfg.data["base_url"].rstrip("/")
+        body = await _webhub_login(base_url, cfg.data.get("username", ""), cfg.data.get("password", ""))
+        token = body["token"]
+        faculty_id = body["faculty_id"]
+        expires_at = _decode_jwt_exp(token) or (datetime.utcnow() + timedelta(hours=1))
+
+        cfg.data = {
+            **cfg.data,
+            "token": token,
+            "token_expires_at": expires_at.isoformat(),
+            "faculty_id": faculty_id,
+        }
+        session.add(cfg)
+        await session.commit()
+
+        return {
+            "ok": True,
+            "faculty_name": body.get("faculty_name"),
+            "user_id": body.get("user_id"),
+            "username": body.get("username"),
+        }
+    except Exception as e:
+        logger.error("Webhub test-connection failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
@@ -377,7 +412,7 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
 
             reply = None
             if message_text and contact.agent_chat_enabled:
-                reply = await _relay_to_webhub(session, message_text)
+                reply = await _relay_to_webhub(session, message_text, contact.platform_id)
 
             if reply and page_token:
                 try:
@@ -491,29 +526,93 @@ async def _get_or_create_contact(session: AsyncSession, msg: IncomingMessage, pa
     return contact
 
 
-async def _relay_to_webhub(session: AsyncSession, message: str) -> str | None:
+def _decode_jwt_exp(token: str) -> datetime | None:
+    try:
+        import base64
+
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        exp = payload.get("exp")
+        return datetime.utcfromtimestamp(exp) if exp else None
+    except Exception:
+        return None
+
+
+async def _webhub_login(base_url: str, username: str, password: str) -> dict:
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            f"{base_url}/auth/login",
+            json={"username": username, "password": password},
+        )
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("message", resp.text)
+        except Exception:
+            detail = resp.text
+        raise RuntimeError(detail)
+    return resp.json()
+
+
+async def _get_webhub_token(session: AsyncSession, cfg: Config, force_refresh: bool = False) -> tuple[str, int]:
+    now = datetime.utcnow()
+    cached_token = cfg.data.get("token")
+    cached_expires_at = cfg.data.get("token_expires_at")
+    cached_faculty_id = cfg.data.get("faculty_id")
+
+    if not force_refresh and cached_token and cached_expires_at and cached_faculty_id is not None:
+        expires_at = datetime.fromisoformat(cached_expires_at)
+        if (expires_at - now).total_seconds() > 60:
+            return cached_token, cached_faculty_id
+
+    base_url = cfg.data["base_url"].rstrip("/")
+    body = await _webhub_login(base_url, cfg.data.get("username", ""), cfg.data.get("password", ""))
+    token = body["token"]
+    faculty_id = body["faculty_id"]
+    expires_at = _decode_jwt_exp(token) or (now + timedelta(hours=1))
+
+    cfg.data = {
+        **cfg.data,
+        "token": token,
+        "token_expires_at": expires_at.isoformat(),
+        "faculty_id": faculty_id,
+    }
+    session.add(cfg)
+    await session.commit()
+    await session.refresh(cfg)
+
+    return token, faculty_id
+
+
+async def _relay_to_webhub(session: AsyncSession, message: str, session_id: str) -> str | None:
     result = await session.exec(select(Config).where(Config.config_id == "webhub_utcc", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
     cfg = result.first()
-    if not cfg or not cfg.data.get("base_url"):
+    if not cfg or not cfg.data.get("base_url") or not cfg.data.get("username"):
         return None
 
     base_url = cfg.data["base_url"].rstrip("/")
-    headers = {}
-    if cfg.data.get("api_token"):
-        headers["Authorization"] = f"Bearer {cfg.data['api_token']}"
-
     timeout = int(cfg.data.get("timeout", 30))
 
-    try:
+    async def _send(force_refresh: bool) -> httpx.Response:
+        token, faculty_id = await _get_webhub_token(session, cfg, force_refresh=force_refresh)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                f"{base_url}/messages/send",
-                json={"message": message},
-                headers=headers,
+            return await client.post(
+                f"{base_url}/chat_webui/message",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "use_utcc_workflow": True,
+                    "faculty_id": faculty_id,
+                    "user_input": message,
+                    "session_id": session_id,
+                },
             )
-            resp.raise_for_status()
-            body = resp.json()
-            return body.get("reply") or body.get("message") or body.get("text")
+
+    try:
+        resp = await _send(force_refresh=False)
+        if resp.status_code == 401:
+            resp = await _send(force_refresh=True)
+        resp.raise_for_status()
+        return resp.json().get("response")
     except Exception as e:
         logger.error("Webhub relay failed: %s", e)
         return None
@@ -550,7 +649,7 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
         }
 
     # Relay to webhub
-    reply = await _relay_to_webhub(session, msg.message)
+    reply = await _relay_to_webhub(session, msg.message, msg.platform_id)
 
     await session.commit()
     await session.refresh(contact)

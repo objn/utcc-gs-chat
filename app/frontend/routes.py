@@ -230,7 +230,6 @@ async def webhub_save(request: Request, session: AsyncSession = Depends(_get_ses
     form = await request.form()
     data = {
         "base_url": str(form.get("base_url", "")).strip(),
-        "api_token": str(form.get("api_token", "")).strip(),
         "username": str(form.get("username", "")).strip(),
         "password": str(form.get("password", "")).strip(),
         "timeout": str(form.get("timeout", "30")).strip(),
