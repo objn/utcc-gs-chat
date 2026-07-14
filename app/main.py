@@ -26,6 +26,7 @@ from app.models.message import Message  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.worker.tasks import REDIS_EVENTS_CHANNEL
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("gs_chat")
 
 

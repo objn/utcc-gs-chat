@@ -74,8 +74,6 @@ async def ws_events(websocket: WebSocket):
     finally:
         _ws_subscribers.discard(websocket)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
 
 async def _get_session():
     async with AsyncSession(engine) as session:
@@ -472,9 +470,36 @@ async def _schedule_reply_flush(session: AsyncSession, contact_id: str, sender_i
 @router.post("/webhook/facebook")
 async def facebook_webhook(request: Request, session: AsyncSession = Depends(_get_session)):
     body = await request.json()
+    await _process_facebook_webhook_body(body, session)
+    return {"status": "ok"}
 
+
+# ── Webhook: chat.utcc.ac.th agentflow relay ──
+# chat.utcc.ac.th is registered as a second recipient of Facebook's webhook
+# body and forwards that same raw body here. This endpoint runs the
+# identical Facebook Messenger processing pipeline as /webhook/facebook
+# (parse messaging events, upsert contact, relay to webhub, reply to the FB
+# user via the Send API) — see _process_facebook_webhook_body below.
+
+
+@router.post("/webhook/chat-utcc")
+async def chat_utcc_webhook(request: Request, session: AsyncSession = Depends(_get_session)):
+    raw_body = await request.body()
+    logger.info("chat-utcc agentflow relay headers: %s", dict(request.headers))
+    logger.info("chat-utcc agentflow relay body: %s", raw_body.decode("utf-8", errors="replace"))
+
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError as e:
+        logger.error("chat-utcc agentflow relay: body is not valid JSON: %s", e)
+        raise HTTPException(status_code=400, detail="Body is not valid JSON")
+    await _process_facebook_webhook_body(body, session)
+    return {"status": "ok"}
+
+
+async def _process_facebook_webhook_body(body: dict, session: AsyncSession) -> None:
     if body.get("object") != "page":
-        return {"status": "ignored"}
+        return
 
     cfg_result = await session.exec(select(Config).where(Config.config_id == "graph_api", Config.deleted_at.is_(None)))  # type: ignore[arg-type]
     cfg = cfg_result.first()
@@ -544,8 +569,6 @@ async def facebook_webhook(request: Request, session: AsyncSession = Depends(_ge
 
             await _broadcast({"type": "update", "contact_id": contact_id_str})
 
-    return {"status": "ok"}
-
 
 def _raise_for_graph_error(resp: httpx.Response):
     if resp.status_code == 200:
@@ -564,18 +587,47 @@ def _raise_for_graph_error(resp: httpx.Response):
 CONTACT_STAFF_QUICK_REPLY = [{"content_type": "text", "title": "ติดต่อเจ้าหน้าที่", "payload": "CONTACT_STAFF"}]
 
 
+FB_TEXT_LIMIT = 2000
+
+
+def _split_text_for_fb(text: str, limit: int = FB_TEXT_LIMIT) -> list[str]:
+    # Facebook rejects message[text] over 2000 chars outright. Break on the
+    # nearest markdown paragraph boundary within the limit, falling back to
+    # a line break, then any whitespace, so chunks don't sever mid-word —
+    # only cut hard at `limit` if none of those exist in range.
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n\n", 0, limit)
+        if cut == -1:
+            cut = remaining.rfind("\n", 0, limit)
+        if cut == -1:
+            cut = remaining.rfind(" ", 0, limit)
+        if cut == -1:
+            cut = limit
+        chunk = remaining[:cut].rstrip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[cut:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
 async def _fb_send_text(recipient_id: str, text: str, page_token: str, quick_replies: list[dict] | None = None):
     url = f"{GRAPH_API_BASE}/me/messages?access_token={page_token}"
-    message: dict = {"text": text}
-    if quick_replies:
-        message["quick_replies"] = quick_replies
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": message,
-    }
+    chunks = _split_text_for_fb(text)
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(url, json=payload)
-    _raise_for_graph_error(resp)
+        for i, chunk in enumerate(chunks):
+            message: dict = {"text": chunk}
+            if quick_replies and i == len(chunks) - 1:
+                message["quick_replies"] = quick_replies
+            payload = {
+                "recipient": {"id": recipient_id},
+                "message": message,
+            }
+            resp = await client.post(url, json=payload)
+            _raise_for_graph_error(resp)
 
 
 async def _fb_send_attachment(
