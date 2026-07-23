@@ -104,4 +104,5 @@ volumes:
 # ──────────────────────────────────────────
 networks:
   app_network:
+    name: gschat_app_network
     driver: bridge
