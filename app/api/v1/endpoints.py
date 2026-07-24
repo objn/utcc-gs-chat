@@ -38,6 +38,10 @@ def _save_upload(file_bytes: bytes, filename: str) -> str:
 
 AGENT_DISABLE_KEYWORDS = ["ติดต่อเจ้าหน้าที่", "ขอคุยกับเจ้าหน้าที่", "ขอคุยกับคน"]
 
+# Sent immediately whenever a user's message matches AGENT_DISABLE_KEYWORDS,
+# so a human can follow up instead of the bot continuing to reply.
+AGENT_DISABLE_REPLY_TEXT = "รบกวนขอชื่อและเบอร์โทรเพื่อให้เจ้าหน้าที่ติดต่อกลับเค่ะ"
+
 # ── Live update broadcast (WebSocket) ──
 # In-process pub/sub so /messages can get pushed updates instead of polling.
 # One connected WebSocket per browser tab, held open indefinitely — unlike
@@ -547,14 +551,25 @@ async def _process_facebook_webhook_body(body: dict, session: AsyncSession) -> N
             contact.last_message_at = bangkok_now_str()
             contact.updated_at = datetime.utcnow()
 
+            disabled_by_keyword = False
             for kw in AGENT_DISABLE_KEYWORDS:
                 if kw in message_text:
                     contact.agent_chat_enabled = False
+                    disabled_by_keyword = True
                     break
 
             contact_id_str = str(contact.id)
             agent_chat_enabled = contact.agent_chat_enabled
             await session.commit()
+
+            if disabled_by_keyword and page_token:
+                try:
+                    await _fb_send_text(sender_id, AGENT_DISABLE_REPLY_TEXT, page_token)
+                    session.add(Message(contact_id=contact.id, direction="out", text=AGENT_DISABLE_REPLY_TEXT))
+                    contact.last_message = AGENT_DISABLE_REPLY_TEXT[:1000]
+                    await session.commit()
+                except Exception as e:
+                    logger.error("Failed to send agent-disable reply: %s", e)
 
             if is_new_contact and page_token and welcome_text_cfg:
                 try:
@@ -831,6 +846,9 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
     for kw in AGENT_DISABLE_KEYWORDS:
         if kw in msg.message:
             contact.agent_chat_enabled = False
+            session.add(Message(contact_id=contact.id, direction="out", text=AGENT_DISABLE_REPLY_TEXT))
+            contact.last_message = AGENT_DISABLE_REPLY_TEXT[:1000]
+            contact.last_message_at = bangkok_now_str()
             contact_id_str = str(contact.id)
             await session.commit()
             await session.refresh(contact)
@@ -838,7 +856,7 @@ async def webhook_incoming(msg: IncomingMessage, session: AsyncSession = Depends
             return {
                 "contact_id": contact_id_str,
                 "agent_chat_enabled": False,
-                "reply": None,
+                "reply": AGENT_DISABLE_REPLY_TEXT,
                 "reason": "agent_disabled_by_keyword",
             }
 
